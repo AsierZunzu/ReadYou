@@ -34,9 +34,13 @@ interface ArticleDao {
         isStarred: Boolean,
     ): Int
 
+    /**
+     * Applies a read-state change that originated *remotely*. Any pending local claim is dropped,
+     * because the remote value is now the agreed-upon truth.
+     */
     @Query(
         """
-        UPDATE article SET isUnread = :isUnread 
+        UPDATE article SET isUnread = :isUnread, readStatusUpdateAt = NULL
         WHERE accountId = :accountId
         AND id in (:ids)
         """
@@ -46,6 +50,59 @@ interface ArticleDao {
         ids: Set<String>,
         isUnread: Boolean,
     ): Int
+
+    /**
+     * Applies a read-state change that originated *locally*, stamping it so sync reconciliation
+     * knows the remote has not acknowledged it yet.
+     *
+     * @see clearPendingReadStatus
+     */
+    @Query(
+        """
+        UPDATE article SET isUnread = :isUnread, readStatusUpdateAt = :updatedAt
+        WHERE accountId = :accountId
+        AND id in (:ids)
+        """
+    )
+    fun markAsReadLocallyByIdSet(
+        accountId: Int,
+        ids: Set<String>,
+        isUnread: Boolean,
+        updatedAt: Date,
+    ): Int
+
+    /** Marks local read-state changes as acknowledged by the remote. */
+    @Query(
+        """
+        UPDATE article SET readStatusUpdateAt = NULL
+        WHERE accountId = :accountId
+        AND id in (:ids)
+        """
+    )
+    fun clearPendingReadStatus(accountId: Int, ids: Set<String>): Int
+
+    /**
+     * Rolls a local read-state change back to [isUnread] and drops the pending claim. Used when a
+     * change can no longer be delivered to the remote and must be abandoned.
+     */
+    @Query(
+        """
+        UPDATE article SET isUnread = :isUnread, readStatusUpdateAt = NULL
+        WHERE accountId = :accountId
+        AND id in (:ids)
+        """
+    )
+    fun revertPendingReadStatus(accountId: Int, ids: Set<String>, isUnread: Boolean): Int
+
+    /** Local read-state changes still awaiting acknowledgement from the remote. */
+    @Query(
+        """
+        SELECT id, isUnread, isStarred, readStatusUpdateAt FROM article
+        WHERE accountId = :accountId
+        AND readStatusUpdateAt IS NOT NULL
+        """
+    )
+    suspend fun queryPendingReadStatus(accountId: Int): List<ArticleMeta>
 
     @Transaction
     @RewriteQueriesToDropUnusedColumns
@@ -688,7 +745,7 @@ interface ArticleDao {
     @Transaction
     @Query(
         """
-        SELECT id, isUnread, isStarred FROM article
+        SELECT id, isUnread, isStarred, readStatusUpdateAt FROM article
         WHERE accountId = :accountId
         ORDER BY
             CASE WHEN :sortAscending = 1 THEN date END ASC,
@@ -702,7 +759,7 @@ interface ArticleDao {
     @Transaction
     @Query(
         """
-        SELECT id, isUnread, isStarred FROM article
+        SELECT id, isUnread, isStarred, readStatusUpdateAt FROM article
         WHERE accountId = :accountId
         AND isUnread = :isUnread
         ORDER BY
@@ -717,7 +774,7 @@ interface ArticleDao {
     @Transaction
     @Query(
         """
-        SELECT id, isUnread, isStarred FROM article
+        SELECT id, isUnread, isStarred, readStatusUpdateAt FROM article
         WHERE accountId = :accountId
         AND date < :before
         ORDER BY
@@ -732,7 +789,7 @@ interface ArticleDao {
     @Transaction
     @Query(
         """
-        SELECT id, isUnread, isStarred FROM article
+        SELECT id, isUnread, isStarred, readStatusUpdateAt FROM article
         WHERE accountId = :accountId
         AND isUnread = :isUnread
         AND date < :before
@@ -748,7 +805,7 @@ interface ArticleDao {
     @Transaction
     @Query(
         """
-        SELECT id, isUnread, isStarred FROM article
+        SELECT id, isUnread, isStarred, readStatusUpdateAt FROM article
         WHERE accountId = :accountId
         AND feedId = :feedId
         AND isUnread = :isUnread
@@ -764,7 +821,7 @@ interface ArticleDao {
     @Transaction
     @Query(
         """
-        SELECT id, isUnread, isStarred FROM article
+        SELECT id, isUnread, isStarred, readStatusUpdateAt FROM article
         WHERE accountId = :accountId
         AND feedId = :feedId
         AND isUnread = :isUnread

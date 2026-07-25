@@ -372,6 +372,8 @@ constructor(
         }
     }
 
+    override val supportsReadStatusSync: Boolean get() = true
+
     @CheckResult
     override suspend fun syncReadStatus(articleIds: Set<String>, isUnread: Boolean): Set<String> {
         val feverAPI = getFeverAPI()

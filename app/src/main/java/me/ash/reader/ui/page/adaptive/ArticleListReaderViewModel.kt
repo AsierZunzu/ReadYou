@@ -211,7 +211,6 @@ constructor(
     }
 
     fun sync() {
-        diffMapHolder.commitDiffsToDb()
         viewModelScope.launch {
             _isSyncingFlow.value = true
             val isSyncing = syncWorkerStatusFlow.value
@@ -223,6 +222,9 @@ constructor(
             }
         }
         applicationScope.launch(ioDispatcher) {
+            // Must complete before the sync starts: the reconciler only defers to local state for
+            // changes that have already been written and stamped.
+            diffMapHolder.flushAll()
             val filterState = filterStateUseCase.filterStateFlow.value
             val service = rssService.get()
             when (service) {

@@ -6,6 +6,7 @@ import androidx.work.*
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.util.concurrent.TimeUnit
+import me.ash.reader.domain.data.DiffMapHolder
 import me.ash.reader.domain.model.account.Account
 import me.ash.reader.infrastructure.rss.ReaderCacheHelper
 
@@ -18,6 +19,7 @@ constructor(
     private val rssService: RssService,
     private val readerCacheHelper: ReaderCacheHelper,
     private val workManager: WorkManager,
+    private val diffMapHolder: DiffMapHolder,
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -26,6 +28,11 @@ constructor(
         require(accountId != -1)
         val feedId = data.getString("feedId")
         val groupId = data.getString("groupId")
+
+        // A background sync can fire at any moment, including while the user is swiping. Land and
+        // push pending read-state changes first, otherwise the reconciler treats the server's
+        // stale view as authoritative and resurrects them.
+        diffMapHolder.flushAll()
 
         return rssService
             .get()
