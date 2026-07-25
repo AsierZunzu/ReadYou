@@ -312,6 +312,16 @@ constructor(
 
             val localItemIds = localAllItems.map { it.id.dollarLast() }.toSet()
 
+            // Articles whose read state was changed on this device and not yet acknowledged by
+            // the server. The remote snapshot below predates those changes, so it must not be
+            // treated as authoritative for them — doing so is what used to make swiped articles
+            // reappear in the unread list.
+            val pendingLocalIds =
+                localAllItems
+                    .filter { it.hasPendingReadStatus }
+                    .map { it.id.dollarLast() }
+                    .toSet()
+
             //            launch {
             //                val toBeStarredRemote = localStarredIds - remoteStarredIds.await()
             //                if (toBeStarredRemote.isNotEmpty()) {
@@ -349,7 +359,7 @@ constructor(
 
             launch {
                 val toBeReadLocal =
-                    remoteReadIds.await().intersect(localUnreadIds).map {
+                    (remoteReadIds.await().intersect(localUnreadIds) - pendingLocalIds).map {
                         accountId spacerDollar it
                     }
                 toBeReadLocal.chunked(1000).forEach {
@@ -363,7 +373,7 @@ constructor(
 
             launch {
                 val toBeUnreadLocal =
-                    localReadIds.intersect(remoteUnreadIds.await()).map {
+                    (localReadIds.intersect(remoteUnreadIds.await()) - pendingLocalIds).map {
                         accountId spacerDollar it
                     }
                 toBeUnreadLocal.chunked(1000).forEach {
@@ -828,6 +838,8 @@ constructor(
                 )
             }
     }
+
+    override val supportsReadStatusSync: Boolean get() = true
 
     override suspend fun syncReadStatus(articleIds: Set<String>, isUnread: Boolean): Set<String> {
         val googleReaderAPI = getGoogleReaderAPI()

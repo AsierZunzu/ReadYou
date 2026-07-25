@@ -49,6 +49,17 @@ data class Article(
     var isReadLater: Boolean = false,
     @ColumnInfo
     var updateAt: Date? = null,
+    /**
+     * Timestamp of the last read-state change made *locally* that the remote server has not
+     * acknowledged yet.
+     *
+     * `null` means there is no unacknowledged local claim, so the remote is authoritative for
+     * [isUnread]. A non-null value means the local state wins during sync reconciliation until
+     * the change is either pushed successfully (cleared to `null`) or given up on and rolled
+     * back to the remote value.
+     */
+    @ColumnInfo
+    var readStatusUpdateAt: Date? = null,
 ) {
 
     @Ignore

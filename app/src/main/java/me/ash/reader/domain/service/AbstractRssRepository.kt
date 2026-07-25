@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.flowOn
 import me.ash.reader.domain.model.account.Account
 import me.ash.reader.domain.model.article.ArchivedArticle
 import me.ash.reader.domain.model.article.Article
+import me.ash.reader.domain.model.article.ArticleMeta
 import me.ash.reader.domain.model.article.ArticleWithFeed
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.group.Group
@@ -129,15 +130,58 @@ abstract class AbstractRssRepository(
         }
     }
 
-    open suspend fun batchMarkAsRead(articleIds: Set<String>, isUnread: Boolean) {
+    /**
+     * Persists a read-state change made by the user on this device. The change is stamped with
+     * [updatedAt] so sync reconciliation knows it has not reached the remote yet; pass `null` for
+     * accounts that have no remote to reconcile against.
+     */
+    open suspend fun batchMarkAsRead(
+        articleIds: Set<String>,
+        isUnread: Boolean,
+        updatedAt: Date? = null,
+    ) {
         val accountId = accountService.getCurrentAccountId()
         articleIds
             .takeIf { it.isNotEmpty() }
             ?.chunked(500)
-            ?.forEachIndexed { index, it ->
-                articleDao.markAsReadByIdSet(accountId, it.toSet(), isUnread)
+            ?.forEach {
+                if (updatedAt != null) {
+                    articleDao.markAsReadLocallyByIdSet(accountId, it.toSet(), isUnread, updatedAt)
+                } else {
+                    articleDao.markAsReadByIdSet(accountId, it.toSet(), isUnread)
+                }
             }
     }
+
+    /** Marks local read-state changes as acknowledged by the remote. */
+    suspend fun clearPendingReadStatus(articleIds: Set<String>) {
+        val accountId = accountService.getCurrentAccountId()
+        articleIds.takeIf { it.isNotEmpty() }?.chunked(500)?.forEach {
+            articleDao.clearPendingReadStatus(accountId, it.toSet())
+        }
+    }
+
+    /**
+     * Abandons local read-state changes that could not be delivered to the remote, restoring
+     * [isUnread] so the two sides agree again.
+     */
+    suspend fun revertPendingReadStatus(articleIds: Set<String>, isUnread: Boolean) {
+        val accountId = accountService.getCurrentAccountId()
+        articleIds.takeIf { it.isNotEmpty() }?.chunked(500)?.forEach {
+            articleDao.revertPendingReadStatus(accountId, it.toSet(), isUnread)
+        }
+    }
+
+    /** Local read-state changes still awaiting acknowledgement from the remote. */
+    suspend fun queryPendingReadStatus(): List<ArticleMeta> =
+        articleDao.queryPendingReadStatus(accountService.getCurrentAccountId())
+
+    /**
+     * Whether this backend can push read-state changes to a remote. When false, local changes are
+     * never stamped as pending — there is nothing to reconcile against, and stamping them would
+     * make them look permanently unacknowledged.
+     */
+    open val supportsReadStatusSync: Boolean get() = false
 
     open suspend fun syncReadStatus(articleIds: Set<String>, isUnread: Boolean): Set<String> {
         /* no-op */
